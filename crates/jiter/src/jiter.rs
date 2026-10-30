@@ -1,7 +1,7 @@
 use crate::errors::{DEFAULT_RECURSION_LIMIT, JiterError, JsonType, LinePosition, json_error};
 use crate::number_decoder::{NumberAny, NumberFloat, NumberInt, NumberRange};
 use crate::parse::{Parser, Peek};
-use crate::string_decoder::{StringDecoder, StringDecoderRange, Tape};
+use crate::string_decoder::{PythonStringDecoder, StringDecoder, StringDecoderRange, Tape};
 use crate::value::{JsonValue, take_value_borrowed, take_value_owned, take_value_skip};
 use crate::{JsonError, JsonErrorType, PartialMode};
 
@@ -195,6 +195,50 @@ impl<'j> Jiter<'j> {
     pub fn next_number_bytes(&mut self) -> JiterResult<&[u8]> {
         let peek = self.peek()?;
         self.known_number_bytes(peek)
+    }
+
+    /// Consume a Python-default number token without converting it. Zero
+    /// disables the integer digit limit; floats are not subject to that limit.
+    pub fn next_python_number_bytes(&mut self, integer_digit_limit: usize) -> JiterResult<&[u8]> {
+        let peek = self.peek()?;
+        match self
+            .parser
+            .consume_python_number(peek.into_inner(), self.allow_inf_nan, integer_digit_limit)
+        {
+            Ok(number) => Ok(&self.data[number.range]),
+            Err(error) => Err(self.maybe_number_error(error, JsonType::Float, peek)),
+        }
+    }
+
+    /// Decode a full string into codepoints, retaining escaped and raw WTF8
+    /// surrogates. This does not change the scalar-string `next_str` API.
+    pub fn next_python_string(&mut self) -> JiterResult<Vec<u32>> {
+        let peek = self.peek()?;
+        if peek != Peek::String {
+            return Err(self.wrong_type(JsonType::String, peek));
+        }
+        self.parser
+            .consume_string::<PythonStringDecoder>(&mut self.tape, false)
+            .map_err(Into::into)
+    }
+
+    /// Consume an object start and its first codepoint key, preserving duplicate
+    /// occurrences for the consumer's first-position/last-value policy.
+    pub fn next_python_object(&mut self) -> JiterResult<Option<Vec<u32>>> {
+        let peek = self.peek()?;
+        if peek != Peek::Object {
+            return Err(self.wrong_type(JsonType::Object, peek));
+        }
+        self.parser
+            .object_first::<PythonStringDecoder>(&mut self.tape)
+            .map_err(Into::into)
+    }
+
+    /// Consume the next object delimiter and codepoint key, or the closing brace.
+    pub fn next_python_key(&mut self) -> JiterResult<Option<Vec<u32>>> {
+        self.parser
+            .object_step::<PythonStringDecoder>(&mut self.tape)
+            .map_err(Into::into)
     }
 
     /// Knowing the next value is a number, parse it and return bytes from the original JSON data.
