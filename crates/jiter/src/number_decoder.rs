@@ -490,7 +490,21 @@ impl NumberRange {
 }
 
 impl AbstractNumberDecoder for NumberRange {
-    fn decode(data: &[u8], mut index: usize, mut first: u8, allow_inf_nan: bool) -> JsonResult<(Self, usize)> {
+    fn decode(data: &[u8], index: usize, first: u8, allow_inf_nan: bool) -> JsonResult<(Self, usize)> {
+        Self::decode_with_integer_limit(data, index, first, allow_inf_nan, None)
+    }
+}
+
+impl NumberRange {
+    /// `None` preserves the upstream bounded scan. The Python path classifies
+    /// the complete token before applying its explicit integer-only limit.
+    pub(crate) fn decode_with_integer_limit(
+        data: &[u8],
+        mut index: usize,
+        mut first: u8,
+        allow_inf_nan: bool,
+        integer_limit: Option<usize>,
+    ) -> JsonResult<(Self, usize)> {
         let start = index;
 
         let positive = match first {
@@ -540,8 +554,13 @@ impl AbstractNumberDecoder for NumberRange {
         // The scan is bounded so an over-long integer is rejected without walking it in full.
         index += 1;
         let digit_start = start + usize::from(!positive);
-        index = digit_run_end(data, index, digit_start + 4300)
-            .ok_or_else(|| json_error!(NumberOutOfRange, digit_start + 4301))?;
+        let scan_limit = if integer_limit.is_some() {
+            data.len()
+        } else {
+            digit_start.saturating_add(4300)
+        };
+        index =
+            digit_run_end(data, index, scan_limit).ok_or_else(|| json_error!(NumberOutOfRange, digit_start + 4301))?;
         match data.get(index) {
             Some(b'.') => {
                 let end = consume_decimal(data, index + 1)?;
@@ -551,7 +570,14 @@ impl AbstractNumberDecoder for NumberRange {
                 let end = consume_exponential(data, index + 1)?;
                 Ok((Self::float(start..end), end))
             }
-            _ => Ok((Self::int(start..index), index)),
+            _ => {
+                if let Some(limit) = integer_limit.filter(|limit| *limit != 0) {
+                    if index - digit_start > limit {
+                        return json_err!(NumberOutOfRange, digit_start + limit + 1);
+                    }
+                }
+                Ok((Self::int(start..index), index))
+            }
         }
     }
 }

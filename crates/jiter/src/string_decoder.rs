@@ -25,6 +25,89 @@ where
 
 pub struct StringDecoder;
 
+/// Full-string decoding into Python codepoints, including unpaired surrogates.
+/// The regular decoder continues to return Unicode scalar strings.
+pub(crate) struct PythonStringDecoder;
+
+impl<'t, 'j: 't> AbstractStringDecoder<'t, 'j> for PythonStringDecoder {
+    type Output = Vec<u32>;
+
+    fn decode(
+        data: &'j [u8],
+        index: usize,
+        _tape: &'t mut Tape,
+        _allow_partial: bool,
+    ) -> JsonResult<(Self::Output, usize)> {
+        let mut index = index + 1;
+        let mut output = Vec::new();
+        loop {
+            let (chunk, _, end) = decode_string_chunk(data, index, true, false)?;
+            append_python_codepoints(&data[index..end], index, &mut output)?;
+            match chunk {
+                StringChunk::StringEnd => return Ok((output, end + 1)),
+                StringChunk::Backslash => index = end + 1,
+            }
+            let next = data
+                .get(index)
+                .ok_or_else(|| json_error!(EofWhileParsingString, index))?;
+            let codepoint = match next {
+                b'"' | b'\\' | b'/' => u32::from(*next),
+                b'b' => 8,
+                b'f' => 12,
+                b'n' => 10,
+                b'r' => 13,
+                b't' => 9,
+                b'u' => {
+                    let (first, end) = parse_u4(data, index)?;
+                    index = end;
+                    if (0xd800..=0xdbff).contains(&first) && data.get(index + 1..index + 3) == Some(b"\\u") {
+                        let (second, end) = parse_u4(data, index + 2)?;
+                        if (0xdc00..=0xdfff).contains(&second) {
+                            index = end;
+                            0x10000 + ((u32::from(first) - 0xd800) << 10) + u32::from(second) - 0xdc00
+                        } else {
+                            u32::from(first)
+                        }
+                    } else {
+                        u32::from(first)
+                    }
+                }
+                _ => return json_err!(InvalidEscape, index),
+            };
+            output.push(codepoint);
+            index += 1;
+        }
+    }
+}
+
+fn append_python_codepoints(mut data: &[u8], mut start: usize, output: &mut Vec<u32>) -> JsonResult<()> {
+    loop {
+        match from_utf8(data) {
+            Ok(text) => {
+                output.extend(text.chars().map(u32::from));
+                return Ok(());
+            }
+            Err(error) => {
+                let valid = error.valid_up_to();
+                // Recheck the prefix with the same safe UTF8 decoder; no scalar
+                // string is ever constructed from the surrogatepass sequence.
+                let text = from_utf8(&data[..valid]).map_err(|_| json_error!(InvalidUnicodeCodePoint, start))?;
+                output.extend(text.chars().map(u32::from));
+                data = &data[valid..];
+                start += valid;
+                match data {
+                    [0xed, second @ 0xa0..=0xbf, third @ 0x80..=0xbf, ..] => {
+                        output.push(0xd000 | ((u32::from(*second) & 0x3f) << 6) | (u32::from(*third) & 0x3f));
+                        data = &data[3..];
+                        start += 3;
+                    }
+                    _ => return json_err!(InvalidUnicodeCodePoint, start),
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum StringOutputType<'t, 'j>
 where
