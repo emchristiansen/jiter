@@ -27,6 +27,10 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
+        with:
+          toolchain: '1.100.0'
+
       - name: resolve MSRV
         id: resolve-msrv
         run: echo MSRV=`cargo metadata --format-version 1 --no-deps --frozen --quiet --offline --manifest-path Cargo.toml | jq -r '.packages[0].rust_version'` >> $GITHUB_OUTPUT
@@ -37,13 +41,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rust-version: [stable]
+        rust-version: ['1.100.0']
         runs-on: [ubuntu, macos]
         python-version: ['']
         include:
           - rust-version: ${{ needs.resolve.outputs.MSRV }}
             runs-on: ubuntu
-          - rust-version: stable
+          - rust-version: '1.100.0'
             runs-on: ubuntu
             python-version: '3.14t'
           - rust-version: nightly
@@ -54,6 +58,8 @@ jobs:
     env:
       RUNS_ON: ${{ matrix.runs-on }}-latest
       RUST_VERSION: ${{ matrix.rust-version }}
+      # Keep intentional MSRV/nightly lanes above the normal root toolchain pin.
+      RUSTUP_TOOLCHAIN: ${{ matrix.rust-version }}
       # the corpus the json_cases tests run over, checked out and built below
       JSON_CASES: ${{ github.workspace }}/json-cases
 
@@ -67,6 +73,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version || '3.13' }}
 
+      # Resolve MSRV dependencies with the normal pinned Cargo before testing on the MSRV.
+      - if: matrix.rust-version == needs.resolve.outputs.MSRV
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
+        with:
+          toolchain: '1.100.0'
+
       # no release versioning, see https://github.com/dtolnay/rust-toolchain/issues/180
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
         with:
@@ -75,7 +87,7 @@ jobs:
       - name: Generate MSRV-compatible lockfile
         if: matrix.rust-version == needs.resolve.outputs.MSRV
         run: |
-          CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo +stable update
+          CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo +1.100.0 update
 
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
@@ -98,11 +110,11 @@ jobs:
           enable-cache: false # the corpus generator has no dependencies, there is nothing to cache
 
       # cases/ and cases.json are gitignored build artifacts, so a fresh checkout has to build
-      # them; the indexer is a separate crate, built with stable rather than this job's toolchain
+      # them; the indexer is a separate crate, built with 1.100.0 rather than this job's toolchain
       - name: build the json-cases corpus
         run: make -C json-cases build
         env:
-          RUSTUP_TOOLCHAIN: stable
+          RUSTUP_TOOLCHAIN: '1.100.0'
 
       - name: install cargo-careful
         if: matrix.rust-version == 'nightly'
@@ -157,7 +169,7 @@ jobs:
       # no release versioning, see https://github.com/dtolnay/rust-toolchain/issues/180
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
         with:
-          toolchain: stable
+          toolchain: '1.100.0'
 
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
@@ -219,7 +231,7 @@ jobs:
 
       - uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3 # v1.3.0
         with:
-          channel: stable
+          channel: '1.100.0'
           cache-target: release
           bins: cargo-codspeed
 
@@ -255,7 +267,7 @@ jobs:
       # no release versioning, see https://github.com/dtolnay/rust-toolchain/issues/180
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
         with:
-          toolchain: stable
+          toolchain: '1.100.0'
 
       # resolve dependencies fresh, as they are for anyone adding jiter to their
       # project; every other job builds against the committed Cargo.lock
@@ -268,6 +280,8 @@ jobs:
 
   fuzz:
     name: fuzz on ${{ matrix.runs-on }}
+    env:
+      RUSTUP_TOOLCHAIN: nightly
     strategy:
       fail-fast: false
       matrix:
@@ -299,6 +313,8 @@ jobs:
 
   fuzz-skip:
     name: fuzz skip
+    env:
+      RUSTUP_TOOLCHAIN: nightly
     # we only run this on ubuntu since architecture should make no difference
 
     runs-on: ubuntu-latest
@@ -344,7 +360,7 @@ jobs:
       # no release versioning, see https://github.com/dtolnay/rust-toolchain/issues/180
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
         with:
-          toolchain: stable
+          toolchain: '1.100.0'
           components: rustfmt,clippy
 
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -378,7 +394,7 @@ jobs:
         with:
           command: sdist
           args: --out dist
-          rust-toolchain: stable
+          rust-toolchain: '1.100.0'
           working-directory: crates/jiter-python
       - name: verify sdist lockfile for locked vendoring
         run: |
@@ -471,7 +487,7 @@ jobs:
       # no release versioning, see https://github.com/dtolnay/rust-toolchain/issues/180
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
         with:
-          toolchain: stable
+          toolchain: '1.100.0'
 
       - name: build wheels
         uses: PyO3/maturin-action@04ac600d27cdf7a9a280dadf7147097c42b757ad # v1.50.1
@@ -479,7 +495,7 @@ jobs:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux }}
           args: --release --out dist --interpreter ${{ matrix.interpreter || '3.11 3.12 3.13 3.14 3.14t 3.15 3.15t' }}
-          rust-toolchain: stable
+          rust-toolchain: '1.100.0'
           working-directory: crates/jiter-python
 
       - run: ${{ (matrix.os == 'windows' && 'dir') || 'ls -lh' }} crates/jiter-python/dist/
@@ -532,7 +548,7 @@ jobs:
             --pgo
             --out dist
             --interpreter ${{ matrix.interpreter }}
-          rust-toolchain: stable
+          rust-toolchain: '1.100.0'
           working-directory: crates/jiter-python
 
       - run: ${{ (startsWith(matrix.platform.os, 'windows') && 'dir') || 'ls -lh' }} crates/jiter-python/dist/
@@ -583,6 +599,7 @@ jobs:
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         # Unclear how to avoid manually specifying this yet (https://github.com/PyO3/maturin/issues/3189):
         env:
+          RUSTUP_TOOLCHAIN: ${{ steps.pyodide-config.outputs.rust-toolchain }}
           CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS: ${{ steps.pyodide-config.outputs.rustflags }}
           MATURIN_PYEMSCRIPTEN_PLATFORM_VERSION: ${{ steps.pyodide-config.outputs.pyodide-abi-version }}
         with:
@@ -786,11 +803,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: install rust stable
+      - name: install rust 1.100.0
         # no release versioning, see https://github.com/dtolnay/rust-toolchain/issues/180
         uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9
         with:
-          toolchain: stable
+          toolchain: '1.100.0'
 
       - run: cargo publish -p jiter
         env:
