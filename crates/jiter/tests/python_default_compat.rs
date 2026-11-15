@@ -13,7 +13,7 @@ fn escaped_surrogates_preserve_codepoints_and_only_combine_adjacent_pairs() {
         (br#""\ud800""#.as_slice(), vec![0xd800]),
         (br#""\udfff""#.as_slice(), vec![0xdfff]),
         (br#""\ud800\udc00""#.as_slice(), vec![0x10000]),
-        (br#""\udbff\udfff""#.as_slice(), vec![0x10ffff]),
+        (br#""\udbff\udfff""#.as_slice(), vec![0x0010_ffff]),
         (br#""\ud800\u0061""#.as_slice(), vec![0xd800, 97]),
         (br#""\ud800\ud800\udc00""#.as_slice(), vec![0xd800, 0x10000]),
         (br#""\udc00\ud800""#.as_slice(), vec![0xdc00, 0xd800]),
@@ -70,7 +70,7 @@ fn object_iteration_retains_duplicate_decoded_keys_and_delimiter_checks() {
     assert_eq!(parser.next_int().unwrap(), jiter::NumberInt::Int(3));
     assert_eq!(parser.next_python_key().unwrap(), None);
     parser.finish().unwrap();
-    for raw in [br#"{"a" 1}"#.as_slice(), br#"{1:2}"#, b"{"] {
+    for raw in [br#"{"a" 1}"#.as_slice(), br"{1:2}", b"{"] {
         assert!(Jiter::new(raw).next_python_object().is_err());
     }
     let mut trailing = Jiter::new(br#"{"a":1,}"#);

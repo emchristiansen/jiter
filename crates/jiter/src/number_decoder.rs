@@ -571,10 +571,10 @@ impl NumberRange {
                 Ok((Self::float(start..end), end))
             }
             _ => {
-                if let Some(limit) = integer_limit.filter(|limit| *limit != 0) {
-                    if index - digit_start > limit {
-                        return json_err!(NumberOutOfRange, digit_start + limit + 1);
-                    }
+                if let Some(limit) = integer_limit.filter(|limit| *limit != 0)
+                    && index - digit_start > limit
+                {
+                    return json_err!(NumberOutOfRange, digit_start + limit + 1);
                 }
                 Ok((Self::int(start..index), index))
             }
