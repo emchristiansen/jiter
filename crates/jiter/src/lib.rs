@@ -13,6 +13,12 @@
 //! * [`Jiter`] an iterator over JSON data
 //! * [`PythonParse`] which parses a JSON string into a Python object
 //!
+//! The `Jiter::next_python_*` iterator methods additionally expose full-string
+//! Unicode codepoints (including unpaired surrogates) and original number bytes
+//! under an explicit integer digit limit. They retain object-key occurrences;
+//! consumers own duplicate replacement, numeric conversion and nesting policy.
+//! These methods do not change the default scalar-string or number APIs.
+//!
 //! ## JsonValue Example
 //!
 //! See [the `JsonValue` docs][JsonValue] for more details.

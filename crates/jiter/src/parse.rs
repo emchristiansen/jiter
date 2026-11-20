@@ -2,7 +2,7 @@ use std::fmt;
 use std::ops::Range;
 
 use crate::errors::{JsonResult, LinePosition, json_err};
-use crate::number_decoder::AbstractNumberDecoder;
+use crate::number_decoder::{AbstractNumberDecoder, NumberRange};
 use crate::string_decoder::{AbstractStringDecoder, Tape};
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -211,6 +211,18 @@ impl<'j> Parser<'j> {
 
     pub fn consume_number<D: AbstractNumberDecoder>(&mut self, first: u8, allow_inf_nan: bool) -> JsonResult<D> {
         let (output, index) = D::decode(self.data, self.index, first, allow_inf_nan)?;
+        self.index = index;
+        Ok(output)
+    }
+
+    pub fn consume_python_number(
+        &mut self,
+        first: u8,
+        allow_inf_nan: bool,
+        integer_limit: usize,
+    ) -> JsonResult<NumberRange> {
+        let (output, index) =
+            NumberRange::decode_with_integer_limit(self.data, self.index, first, allow_inf_nan, Some(integer_limit))?;
         self.index = index;
         Ok(output)
     }
